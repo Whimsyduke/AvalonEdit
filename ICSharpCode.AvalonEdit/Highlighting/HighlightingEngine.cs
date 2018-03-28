@@ -195,10 +195,19 @@ namespace ICSharpCode.AvalonEdit.Highlighting
 			if (highlightedLine != null) {
 				IList<HighlightingRule> rules = CurrentRuleSet.Rules;
 				Match[] matches = AllocateMatchArray(rules.Count);
-				while (true) {
-					for (int i = 0; i < matches.Length; i++) {
-						if (matches[i] == null || (matches[i].Success && matches[i].Index < position))
+				while (true)
+				{
+					for (int i = 0; i < matches.Length; i++)
+					{
+						if (matches[i] == null || (matches[i].Index < position))
+						{
 							matches[i] = rules[i].Regex.Match(lineText, position, until - position);
+							if (string.IsNullOrEmpty(matches[i].Value))
+							{
+								Regex temp = new Regex("[^\\s\\S]");
+								matches[i] = temp.Match(lineText, position, until - position);
+							}
+						}
 					}
 					Match firstMatch = Minimum(matches, null);
 					if (firstMatch == null)

@@ -143,8 +143,8 @@ namespace ICSharpCode.AvalonEdit.Search
 		
 		static void MarkerBrushChangedCallback(DependencyObject d, DependencyPropertyChangedEventArgs e)
 		{
-			SearchPanel panel = d as SearchPanel;
-			if (panel != null) {
+			if (d is SearchPanel panel)
+			{
 				panel.renderer.MarkerBrush = (Brush)e.NewValue;
 			}
 		}
@@ -158,8 +158,8 @@ namespace ICSharpCode.AvalonEdit.Search
 		
 		static void SearchPatternChangedCallback(DependencyObject d, DependencyPropertyChangedEventArgs e)
 		{
-			SearchPanel panel = d as SearchPanel;
-			if (panel != null) {
+			if (d is SearchPanel panel)
+			{
 				panel.ValidateSearchText();
 				panel.UpdateSearch();
 			}
@@ -191,7 +191,7 @@ namespace ICSharpCode.AvalonEdit.Search
 		public void Attach(TextArea textArea)
 		{
 			if (textArea == null)
-				throw new ArgumentNullException("textArea");
+				throw new ArgumentNullException(nameof(textArea));
 			AttachInternal(textArea);
 		}
 		
@@ -202,7 +202,7 @@ namespace ICSharpCode.AvalonEdit.Search
 		public static SearchPanel Install(TextEditor editor)
 		{
 			if (editor == null)
-				throw new ArgumentNullException("editor");
+				throw new ArgumentNullException(nameof(editor));
 			return Install(editor.TextArea);
 		}
 		
@@ -212,7 +212,7 @@ namespace ICSharpCode.AvalonEdit.Search
 		public static SearchPanel Install(TextArea textArea)
 		{
 			if (textArea == null)
-				throw new ArgumentNullException("textArea");
+				throw new ArgumentNullException(nameof(textArea));
 			SearchPanel panel = new SearchPanel();
 			panel.AttachInternal(textArea);
 			panel.handler = new SearchInputHandler(textArea, panel);
@@ -233,7 +233,7 @@ namespace ICSharpCode.AvalonEdit.Search
 		/// </summary>
 		public void Uninstall()
 		{
-			CloseAndRemove();
+			Uninstall();
 			textArea.DefaultInputHandler.NestedInputHandlers.Remove(handler);
 		}
 		
@@ -246,8 +246,8 @@ namespace ICSharpCode.AvalonEdit.Search
 			renderer = new SearchResultBackgroundRenderer();
 			currentDocument = textArea.Document;
 			if (currentDocument != null)
-				currentDocument.TextChanged += textArea_Document_TextChanged;
-			textArea.DocumentChanged += textArea_DocumentChanged;
+				currentDocument.TextChanged += TextArea_Document_TextChanged;
+			textArea.DocumentChanged += TextArea_DocumentChanged;
 			KeyDown += SearchLayerKeyDown;
 			
 			this.CommandBindings.Add(new CommandBinding(SearchCommands.FindNext, (sender, e) => FindNext()));
@@ -256,18 +256,18 @@ namespace ICSharpCode.AvalonEdit.Search
 			IsClosed = true;
 		}
 
-		void textArea_DocumentChanged(object sender, EventArgs e)
+		void TextArea_DocumentChanged(object sender, EventArgs e)
 		{
 			if (currentDocument != null)
-				currentDocument.TextChanged -= textArea_Document_TextChanged;
+				currentDocument.TextChanged -= TextArea_Document_TextChanged;
 			currentDocument = textArea.Document;
 			if (currentDocument != null) {
-				currentDocument.TextChanged += textArea_Document_TextChanged;
+				currentDocument.TextChanged += TextArea_Document_TextChanged;
 				DoSearch(false);
 			}
 		}
 
-		void textArea_Document_TextChanged(object sender, EventArgs e)
+		void TextArea_Document_TextChanged(object sender, EventArgs e)
 		{
 			DoSearch(false);
 		}
@@ -433,9 +433,9 @@ namespace ICSharpCode.AvalonEdit.Search
 		public void CloseAndRemove()
 		{
 			Close();
-			textArea.DocumentChanged -= textArea_DocumentChanged;
+			textArea.DocumentChanged -= TextArea_DocumentChanged;
 			if (currentDocument != null)
-				currentDocument.TextChanged -= textArea_Document_TextChanged;
+				currentDocument.TextChanged -= TextArea_Document_TextChanged;
 		}
 		
 		/// <summary>
@@ -462,9 +462,7 @@ namespace ICSharpCode.AvalonEdit.Search
 		/// </summary>
 		protected virtual void OnSearchOptionsChanged(SearchOptionsChangedEventArgs e)
 		{
-			if (SearchOptionsChanged != null) {
-				SearchOptionsChanged(this, e);
-			}
+			SearchOptionsChanged?.Invoke(this, e);
 		}
 	}
 	
