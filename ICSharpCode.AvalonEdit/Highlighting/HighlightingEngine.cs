@@ -49,30 +49,32 @@ namespace ICSharpCode.AvalonEdit.Highlighting
 				throw new ArgumentNullException("mainRuleSet");
 			this.mainRuleSet = mainRuleSet;
 		}
-		
+
 		/// <summary>
 		/// Gets/sets the current span stack.
 		/// </summary>
-		public SpanStack CurrentSpanStack {
+		public SpanStack CurrentSpanStack
+		{
 			get { return spanStack; }
-			set {
+			set
+			{
 				spanStack = value ?? SpanStack.Empty;
 			}
 		}
-		
+
 		#region Highlighting Engine
-		
+
 		// local variables from HighlightLineInternal (are member because they are accessed by HighlighLine helper methods)
 		string lineText;
 		int lineStartOffset;
 		int position;
-		
+
 		/// <summary>
 		/// the HighlightedLine where highlighting output is being written to.
 		/// if this variable is null, nothing is highlighted and only the span state is updated
 		/// </summary>
 		HighlightedLine highlightedLine;
-		
+
 		/// <summary>
 		/// Highlights the specified line in the specified document.
 		/// 
@@ -84,17 +86,20 @@ namespace ICSharpCode.AvalonEdit.Highlighting
 		{
 			this.lineStartOffset = line.Offset;
 			this.lineText = document.GetText(line);
-			try {
+			try
+			{
 				this.highlightedLine = new HighlightedLine(document, line);
 				HighlightLineInternal();
 				return this.highlightedLine;
-			} finally {
+			}
+			finally
+			{
 				this.highlightedLine = null;
 				this.lineText = null;
 				this.lineStartOffset = 0;
 			}
 		}
-		
+
 		/// <summary>
 		/// Updates <see cref="CurrentSpanStack"/> for the specified line in the specified document.
 		/// 
@@ -106,144 +111,183 @@ namespace ICSharpCode.AvalonEdit.Highlighting
 		{
 			//this.lineStartOffset = line.Offset; not necessary for scanning
 			this.lineText = document.GetText(line);
-			try {
+			try
+			{
 				Debug.Assert(highlightedLine == null);
 				HighlightLineInternal();
-			} finally {
+			}
+			finally
+			{
 				this.lineText = null;
 			}
 		}
-		
+
 		void HighlightLineInternal()
 		{
 			position = 0;
 			ResetColorStack();
-			Dictionary<int, List<Match>> matchDict = new Dictionary<int, List<Match>>();
-			for (int i = 0; i < CurrentRuleSet.Rules.Count; i++)
+			HighlightingRuleSet currentRuleSet = this.CurrentRuleSet;
+			Stack<Match[]> storedMatchArrays = new Stack<Match[]>();
+			Match[] matches = AllocateMatchArray(currentRuleSet.Spans.Count);
+			Match endSpanMatch = null;
+
+			while (true)
 			{
-				matchDict.Add(i, CurrentRuleSet.Rules[i].Regex.Matches(lineText).Cast<Match>().ToList());
+				for (int i = 0; i < matches.Length; i++)
+				{
+					if (matches[i] == null || (matches[i].Success && matches[i].Index < position))
+					{
+
+						matches[i] = currentRuleSet.Spans[i].StartExpression.Match(lineText, position);
+						if (string.IsNullOrEmpty(matches[i].Value))
+						{
+							matches[i] = NoMatchRegex.Match(lineText, position);
+						}
+					}
+				}
+				if (endSpanMatch == null && !spanStack.IsEmpty)
+					endSpanMatch = spanStack.Peek().EndExpression.Match(lineText, position);
+
+				Match firstMatch = Minimum(matches, endSpanMatch);
+				if (firstMatch == null)
+					break;
+
+				HighlightNonSpans(firstMatch.Index);
+
+				Debug.Assert(position == firstMatch.Index);
+
+				if (firstMatch == endSpanMatch)
+				{
+					HighlightingSpan poppedSpan = spanStack.Peek();
+					if (!poppedSpan.SpanColorIncludesEnd)
+						PopColor(); // pop SpanColor
+					PushColor(poppedSpan.EndColor);
+					position = firstMatch.Index + firstMatch.Length;
+					PopColor(); // pop EndColor
+					if (poppedSpan.SpanColorIncludesEnd)
+						PopColor(); // pop SpanColor
+					spanStack = spanStack.Pop();
+					currentRuleSet = this.CurrentRuleSet;
+					//FreeMatchArray(matches);
+					if (storedMatchArrays.Count > 0)
+					{
+						matches = storedMatchArrays.Pop();
+						int index = currentRuleSet.Spans.IndexOf(poppedSpan);
+						Debug.Assert(index >= 0 && index < matches.Length);
+						if (matches[index].Index == position)
+						{
+							throw new InvalidOperationException(
+								"A highlighting span matched 0 characters, which would cause an endless loop.\n" +
+								"Change the highlighting definition so that either the start or the end regex matches at least one character.\n" +
+								"Start regex: " + poppedSpan.StartExpression + "\n" +
+								"End regex: " + poppedSpan.EndExpression);
+						}
+					}
+					else
+					{
+						matches = AllocateMatchArray(currentRuleSet.Spans.Count);
+					}
+				}
+				else
+				{
+					int index = Array.IndexOf(matches, firstMatch);
+					Debug.Assert(index >= 0);
+					HighlightingSpan newSpan = currentRuleSet.Spans[index];
+					spanStack = spanStack.Push(newSpan);
+					currentRuleSet = this.CurrentRuleSet;
+					storedMatchArrays.Push(matches);
+					matches = AllocateMatchArray(currentRuleSet.Spans.Count);
+					if (newSpan.SpanColorIncludesStart)
+						PushColor(newSpan.SpanColor);
+					PushColor(newSpan.StartColor);
+					position = firstMatch.Index + firstMatch.Length;
+					PopColor();
+					if (!newSpan.SpanColorIncludesStart)
+						PushColor(newSpan.SpanColor);
+				}
+				endSpanMatch = null;
 			}
-			//Stack<Match[]> storedMatchArrays = new Stack<Match[]>();
-			//Match[] matches = AllocateMatchArray(currentRuleSet.Spans.Count);
-			//Match endSpanMatch = null;
-			
-			//while (true) {
-			//	for (int i = 0; i < matches.Length; i++) {
-			//		if (matches[i] == null || (matches[i].Success && matches[i].Index < position))
-			//		{
-			//			matches[i] = currentRuleSet.Spans[i].StartExpression.Match(lineText, position);
-			//			if (string.IsNullOrEmpty(matches[i].Value))
-			//			{
-			//				matches[i] = NoMatchRegex.Match(lineText, position);
-			//			}
-			//		}
-			//	}
-			//	if (endSpanMatch == null && !spanStack.IsEmpty)
-			//		endSpanMatch = spanStack.Peek().EndExpression.Match(lineText, position);
-				
-			//	Match firstMatch = Minimum(matches, endSpanMatch);
-			//	if (firstMatch == null)
-			//		break;
-				
-			//	HighlightNonSpans(firstMatch.Index);
-				
-			//	Debug.Assert(position == firstMatch.Index);
-				
-			//	if (firstMatch == endSpanMatch) {
-			//		HighlightingSpan poppedSpan = spanStack.Peek();
-			//		if (!poppedSpan.SpanColorIncludesEnd)
-			//			PopColor(); // pop SpanColor
-			//		PushColor(poppedSpan.EndColor);
-			//		position = firstMatch.Index + firstMatch.Length;
-			//		PopColor(); // pop EndColor
-			//		if (poppedSpan.SpanColorIncludesEnd)
-			//			PopColor(); // pop SpanColor
-			//		spanStack = spanStack.Pop();
-			//		currentRuleSet = this.CurrentRuleSet;
-			//		//FreeMatchArray(matches);
-			//		if (storedMatchArrays.Count > 0) {
-			//			matches = storedMatchArrays.Pop();
-			//			int index = currentRuleSet.Spans.IndexOf(poppedSpan);
-			//			Debug.Assert(index >= 0 && index < matches.Length);
-			//			if (matches[index].Index == position) {
-			//				throw new InvalidOperationException(
-			//					"A highlighting span matched 0 characters, which would cause an endless loop.\n" +
-			//					"Change the highlighting definition so that either the start or the end regex matches at least one character.\n" +
-			//					"Start regex: " + poppedSpan.StartExpression + "\n" +
-			//					"End regex: " + poppedSpan.EndExpression);
-			//			}
-			//		} else {
-			//			matches = AllocateMatchArray(currentRuleSet.Spans.Count);
-			//		}
-			//	} else {
-			//		int index = Array.IndexOf(matches, firstMatch);
-			//		Debug.Assert(index >= 0);
-			//		HighlightingSpan newSpan = currentRuleSet.Spans[index];
-			//		spanStack = spanStack.Push(newSpan);
-			//		currentRuleSet = this.CurrentRuleSet;
-			//		storedMatchArrays.Push(matches);
-			//		matches = AllocateMatchArray(currentRuleSet.Spans.Count);
-			//		if (newSpan.SpanColorIncludesStart)
-			//			PushColor(newSpan.SpanColor);
-			//		PushColor(newSpan.StartColor);
-			//		position = firstMatch.Index + firstMatch.Length;
-			//		PopColor();
-			//		if (!newSpan.SpanColorIncludesStart)
-			//			PushColor(newSpan.SpanColor);
-			//	}
-			//	endSpanMatch = null;
-			//}
-			//HighlightNonSpans(lineText.Length);
-			
+			HighlightNonSpans(lineText.Length);
+
 			PopAllColors();
 		}
-		
-		//void HighlightNonSpans(int until)
-		//{
-		//	Debug.Assert(position <= until);
-		//	if (position == until)
-		//		return;
-		//	if (highlightedLine != null) {
-		//		IList<HighlightingRule> rules = CurrentRuleSet.Rules;
-		//		Match[] matches = AllocateMatchArray(rules.Count);
-		//		while (true)
-		//		{
-		//			for (int i = 0; i < matches.Length; i++)
-		//			{
-		//				if (matches[i] == null || (matches[i].Index < position))
-		//				{
-		//					matches[i] = rules[i].Regex.Match(lineText, position, until - position);
-		//					if (string.IsNullOrEmpty(matches[i].Value))
-		//					{
-		//						matches[i] = NoMatchRegex.Match(lineText, position, until - position);
-		//					}
-		//				}
-		//			}
-		//			Match firstMatch = Minimum(matches, null);
-		//			if (firstMatch == null)
-		//				break;
-					
-		//			position = firstMatch.Index;
-		//			int ruleIndex = Array.IndexOf(matches, firstMatch);
-		//			if (firstMatch.Length == 0) {
-		//				throw new InvalidOperationException(
-		//					"A highlighting rule matched 0 characters, which would cause an endless loop.\n" +
-		//					"Change the highlighting definition so that the rule matches at least one character.\n" +
-		//					"Regex: " + rules[ruleIndex].Regex);
-		//			}
-		//			PushColor(rules[ruleIndex].Color);
-		//			position = firstMatch.Index + firstMatch.Length;
-		//			PopColor();
-		//		}
-		//		//FreeMatchArray(matches);
-		//	}
-		//	position = until;
-		//}
-		
+
+		void HighlightNonSpans(int until)
+		{
+			Debug.Assert(position <= until);
+			if (position == until)
+				return;
+			if (highlightedLine != null)
+			{
+				IList<HighlightingRule> rules = CurrentRuleSet.Rules;
+				Dictionary<int, List<Match>> matchDict = new Dictionary<int, List<Match>>();
+				for (int i = 0; i < rules.Count; i++)
+				{
+					matchDict.Add(i, rules[i].Regex.Matches(lineText, position).Cast<Match>().Where(P => !string.IsNullOrEmpty(P.Value) && (P.Index + P.Length) <= until).ToList());
+				}
+
+				while (true)
+				{
+					Match firstMatch = Minimum(matchDict, null, position, out int ruleIndex);
+					if (firstMatch == null)
+						break;
+
+					position = firstMatch.Index;
+					if (firstMatch.Length == 0)
+					{
+						throw new InvalidOperationException(
+							"A highlighting rule matched 0 characters, which would cause an endless loop.\n" +
+							"Change the highlighting definition so that the rule matches at least one character.\n" +
+							"Regex: " + rules[ruleIndex].Regex);
+					}
+					PushColor(rules[ruleIndex].Color);
+					position = firstMatch.Index + firstMatch.Length;
+					PopColor();
+				}
+
+
+				//Match[] matches = AllocateMatchArray(rules.Count);
+				//while (true)
+				//{
+				//	for (int i = 0; i < matches.Length; i++)
+				//	{
+				//		if (matches[i] == null || (matches[i].Index < position))
+				//		{
+				//			matches[i] = rules[i].Regex.Match(lineText, position, until - position);
+				//			if (string.IsNullOrEmpty(matches[i].Value))
+				//			{
+				//				matches[i] = NoMatchRegex.Match(lineText, position, until - position);
+				//			}
+				//		}
+				//	}
+				//	Match firstMatch = Minimum(matches, null);
+				//	if (firstMatch == null)
+				//		break;
+
+				//	position = firstMatch.Index;
+				//	int ruleIndex = Array.IndexOf(matches, firstMatch);
+				//	if (firstMatch.Length == 0)
+				//	{
+				//		throw new InvalidOperationException(
+				//			"A highlighting rule matched 0 characters, which would cause an endless loop.\n" +
+				//			"Change the highlighting definition so that the rule matches at least one character.\n" +
+				//			"Regex: " + rules[ruleIndex].Regex);
+				//	}
+				//	PushColor(rules[ruleIndex].Color);
+				//	position = firstMatch.Index + firstMatch.Length;
+				//	PopColor();
+				//}
+				//FreeMatchArray(matches);
+			}
+			position = until;
+		}
+
 		static readonly HighlightingRuleSet emptyRuleSet = new HighlightingRuleSet() { Name = "EmptyRuleSet" };
-		
-		HighlightingRuleSet CurrentRuleSet {
-			get {
+
+		HighlightingRuleSet CurrentRuleSet
+		{
+			get
+			{
 				if (spanStack.IsEmpty)
 					return mainRuleSet;
 				else
@@ -251,7 +295,7 @@ namespace ICSharpCode.AvalonEdit.Highlighting
 			}
 		}
 		#endregion
-		
+
 		#region Color Stack Management
 		Stack<HighlightedSection> highlightedSectionStack;
 		HighlightedSection lastPoppedSection;
@@ -278,15 +322,20 @@ namespace ICSharpCode.AvalonEdit.Highlighting
 		{
 			if (highlightedLine == null)
 				return;
-			if (color == null) {
+			if (color == null)
+			{
 				highlightedSectionStack.Push(null);
-			} else if (lastPoppedSection != null && lastPoppedSection.Color == color
-			           && lastPoppedSection.Offset + lastPoppedSection.Length == position + lineStartOffset)
+			}
+			else if (lastPoppedSection != null && lastPoppedSection.Color == color
+					 && lastPoppedSection.Offset + lastPoppedSection.Length == position + lineStartOffset)
 			{
 				highlightedSectionStack.Push(lastPoppedSection);
 				lastPoppedSection = null;
-			} else {
-				HighlightedSection hs = new HighlightedSection {
+			}
+			else
+			{
+				HighlightedSection hs = new HighlightedSection
+				{
 					Offset = position + lineStartOffset,
 					Color = color
 				};
@@ -295,13 +344,14 @@ namespace ICSharpCode.AvalonEdit.Highlighting
 				lastPoppedSection = null;
 			}
 		}
-		
+
 		void PopColor()
 		{
 			if (highlightedLine == null)
 				return;
 			HighlightedSection s = highlightedSectionStack.Pop();
-			if (s != null) {
+			if (s != null)
+			{
 				s.Length = (position + lineStartOffset) - s.Offset;
 				if (s.Length == 0)
 					highlightedLine.Sections.Remove(s);
@@ -309,70 +359,72 @@ namespace ICSharpCode.AvalonEdit.Highlighting
 					lastPoppedSection = s;
 			}
 		}
-		
+
 		void PopAllColors()
 		{
-			if (highlightedSectionStack != null) {
+			if (highlightedSectionStack != null)
+			{
 				while (highlightedSectionStack.Count > 0)
 					PopColor();
 			}
 		}
 		#endregion
 
-		//#region Match helpers
-		///// <summary>
-		///// Returns the first match from the array or endSpanMatch.
-		///// </summary>
-		//static Match Minimum(Match[] arr, Match endSpanMatch)
-		//{
-		//	Match min = null;
-		//	foreach (Match v in arr) {
-		//		if (v.Success && (min == null || v.Index < min.Index))
-		//			min = v;
-		//	}
-		//	if (endSpanMatch != null && endSpanMatch.Success && (min == null || endSpanMatch.Index < min.Index))
-		//		return endSpanMatch;
-		//	else
-		//		return min;
-		//}
-
+		#region Match helpers
+		/// <summary>
+		/// Returns the first match from the array or endSpanMatch.
+		/// </summary>
+		static Match Minimum(Match[] arr, Match endSpanMatch)
+		{
+			Match min = null;
+			foreach (Match v in arr)
+			{
+				if (v.Success && (min == null || v.Index < min.Index))
+					min = v;
+			}
+			if (endSpanMatch != null && endSpanMatch.Success && (min == null || endSpanMatch.Index < min.Index))
+				return endSpanMatch;
+			else
+				return min;
+		}
 
 		/// <summary>
-		/// 获取第一个适用的规则
+		/// Returns the first match from the array or endSpanMatch.
 		/// </summary>
-		/// <param name="matchDict">匹配词典</param>
-		/// <param name="position">新指针位置</param>
-		/// <param name="index">匹配Rule序号</param>
-		/// <returns></returns>
-		static Match Minimum(Dictionary<int, List<Match>> matchDict, ref int position, out int index)
+		static Match Minimum(Dictionary<int, List<Match>> matchDict, Match endSpanMatch, int position, out int index)
 		{
-			int minimumPos = int.MaxValue;
-			index = 0;
+			Match min = null;
+			index = -1;
 			foreach (var select in matchDict)
 			{
-				Match match = select.Value.First();
-				while (match != null && match.Index < position)
+				List<Match> v = select.Value;
+				if (v.Count == 0) continue;
+				Match first = v.First();
+				while (first.Index < position)
 				{
-					select.Value.Remove(match);
-					match = select.Value.First();
+					v.Remove(first);
+					if (v.Count == 0) break;
+					first = v.First();
 				}
-				if (match == null) continue;
-				if (minimumPos > match.Index)
+				if (min == null || first.Index < min.Index)
 				{
-					minimumPos = match.Index;
+					min = first;
 					index = select.Key;
 				}
 			}
-
+			if (endSpanMatch != null && endSpanMatch.Success && (min == null || endSpanMatch.Index < min.Index))
+				return endSpanMatch;
+			else
+				return min;
 		}
-		
-		//static Match[] AllocateMatchArray(int count)
-		//{
-		//	if (count == 0)
-		//		return Empty<Match>.Array;
-		//	else
-		//		return new Match[count];
-		//}
-		//#endregion
+
+		static Match[] AllocateMatchArray(int count)
+		{
+			if (count == 0)
+				return Empty<Match>.Array;
+			else
+				return new Match[count];
+		}
+		#endregion
 	}
 }
