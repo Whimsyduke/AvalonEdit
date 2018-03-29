@@ -6,3 +6,10 @@ bin/
 /packages/AvalonEdit.Sample
 /packages/NUnit.2.6.3
 /Documentation/IntelliSense
+/.vs/ICSharpCode.AvalonEdit/v14/.suo
+/.vs/ICSharpCode.AvalonEdit/v15/.suo
+/.vs/ICSharpCode.AvalonEdit/v15/Server/sqlite3/db.lock
+/.vs/ICSharpCode.AvalonEdit/v15/Server/sqlite3/storage.ide
+/.vs/ICSharpCode.AvalonEdit/v15/sqlite3/db.lock
+/.vs/ICSharpCode.AvalonEdit/v15/sqlite3/storage.ide
+/ICSharpCode.AvalonEdit/ICSharpCode.AvalonEdit.csproj.nuspec
